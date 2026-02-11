@@ -84,8 +84,13 @@ export default function TicketDetailModal({ ticket, ticketId, isOpen = true, onC
   const [mentionPosition, setMentionPosition] = useState({ bottom: 0, left: 0 });
   const [activeTab, setActiveTab] = useState('comments');
   const [subtaskTitle, setSubtaskTitle] = useState('');
+  const [subtaskStatus, setSubtaskStatus] = useState('TODO');
+  const [subtaskStoryPoints, setSubtaskStoryPoints] = useState('');
+  const [subtaskAssignee, setSubtaskAssignee] = useState('');
+  const [selectedFiles, setSelectedFiles] = useState([]);
   const textareaRef = useRef(null);
   const commentsEndRef = useRef(null);
+  const fileInputRef = useRef(null);
 
   const effectiveTicketId = ticketId || ticket?.id;
   const effectiveProjectId = projectId || ticket?.project_id;
@@ -133,7 +138,7 @@ export default function TicketDetailModal({ ticket, ticketId, isOpen = true, onC
       queryClient.invalidateQueries({ queryKey: ['subtasks', effectiveTicketId] });
       queryClient.invalidateQueries({ queryKey: ['ticket', effectiveTicketId] });
       queryClient.invalidateQueries({ queryKey: ['tickets'] });
-      setSubtaskTitle('');
+      resetSubtaskForm();
       toast.success('Subtask created');
     },
     onError: () => {
@@ -206,7 +211,55 @@ export default function TicketDetailModal({ ticket, ticketId, isOpen = true, onC
 
   const handleCreateSubtask = () => {
     if (!subtaskTitle.trim()) return;
-    createSubtaskMutation.mutate({ title: subtaskTitle });
+
+    const subtaskData = {
+      title: subtaskTitle,
+      status: subtaskStatus,
+      story_points: subtaskStoryPoints ? parseInt(subtaskStoryPoints) : null,
+      assignee_id: subtaskAssignee || null,
+    };
+
+    createSubtaskMutation.mutate(subtaskData);
+  };
+
+  const resetSubtaskForm = () => {
+    setSubtaskTitle('');
+    setSubtaskStatus('TODO');
+    setSubtaskStoryPoints('');
+    setSubtaskAssignee('');
+  };
+
+  const handleFileSelect = (e) => {
+    const files = Array.from(e.target.files);
+    setSelectedFiles(prev => [...prev, ...files]);
+  };
+
+  const removeFile = (index) => {
+    setSelectedFiles(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const handleSubmitCommentWithFiles = async () => {
+    if (!commentText.trim() && selectedFiles.length === 0) return;
+
+    try {
+      await addCommentMutation.mutateAsync({
+        comment_text: commentText,
+        is_internal: isInternal,
+      });
+
+      if (selectedFiles.length > 0) {
+        const formData = new FormData();
+        selectedFiles.forEach(file => {
+          formData.append('files', file);
+        });
+
+        await ticketsAPI.uploadAttachment(effectiveTicketId, formData);
+        setSelectedFiles([]);
+        toast.success('Files uploaded successfully');
+      }
+    } catch (error) {
+      toast.error('Failed to add comment or upload files');
+    }
   };
 
   const handleToggleSubtaskStatus = (subtask) => {
@@ -256,12 +309,8 @@ export default function TicketDetailModal({ ticket, ticketId, isOpen = true, onC
   };
 
   const handleSubmitComment = () => {
-    if (!commentText.trim()) return;
-
-    addCommentMutation.mutate({
-      comment_text: commentText,
-      is_internal: isInternal,
-    });
+    if (!commentText.trim() && selectedFiles.length === 0) return;
+    handleSubmitCommentWithFiles();
   };
 
   const handleKeyPress = (e) => {
@@ -394,19 +443,63 @@ export default function TicketDetailModal({ ticket, ticketId, isOpen = true, onC
                 </label>
               )}
 
+              {selectedFiles.length > 0 && (
+                <div className="mb-2 flex flex-wrap gap-2">
+                  {selectedFiles.map((file, index) => (
+                    <div
+                      key={index}
+                      className="flex items-center gap-2 bg-gray-100 dark:bg-gray-700 px-3 py-1 rounded-lg text-sm"
+                    >
+                      <svg className="w-4 h-4 text-gray-600 dark:text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+                      </svg>
+                      <span className="text-gray-700 dark:text-gray-300">{file.name}</span>
+                      <button
+                        onClick={() => removeFile(index)}
+                        className="text-red-500 hover:text-red-700"
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
               <div className="flex gap-2">
-                <textarea
-                  ref={textareaRef}
-                  value={commentText}
-                  onChange={handleCommentChange}
-                  onKeyPress={handleKeyPress}
-                  placeholder="Type @ to mention team members... (Press Enter to send, Shift+Enter for new line)"
-                  className="flex-1 px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 resize-none"
-                  rows="3"
-                />
+                <div className="flex-1">
+                  <textarea
+                    ref={textareaRef}
+                    value={commentText}
+                    onChange={handleCommentChange}
+                    onKeyPress={handleKeyPress}
+                    placeholder="Type @ to mention team members... (Press Enter to send, Shift+Enter for new line)"
+                    className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 resize-none"
+                    rows="3"
+                  />
+                  <div className="flex gap-2 mt-2">
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      multiple
+                      onChange={handleFileSelect}
+                      className="hidden"
+                    />
+                    <button
+                      onClick={() => fileInputRef.current?.click()}
+                      className="flex items-center gap-2 px-3 py-1 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200 transition-colors"
+                    >
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+                      </svg>
+                      Attach files
+                    </button>
+                  </div>
+                </div>
                 <Button
-                  onClick={handleSubmitComment}
-                  disabled={!commentText.trim()}
+                  onClick={handleSubmitCommentWithFiles}
+                  disabled={!commentText.trim() && selectedFiles.length === 0}
                   loading={addCommentMutation.isPending}
                   className="self-end"
                 >
@@ -504,27 +597,78 @@ export default function TicketDetailModal({ ticket, ticketId, isOpen = true, onC
             </div>
 
             <div className="border-t border-gray-200 dark:border-gray-700 pt-4">
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={subtaskTitle}
-                  onChange={(e) => setSubtaskTitle(e.target.value)}
-                  onKeyPress={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault();
-                      handleCreateSubtask();
-                    }
-                  }}
-                  placeholder="Add a subtask..."
-                  className="flex-1 px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                />
-                <Button
-                  onClick={handleCreateSubtask}
-                  disabled={!subtaskTitle.trim()}
-                  loading={createSubtaskMutation.isPending}
-                >
-                  Add
-                </Button>
+              <h3 className="font-semibold text-gray-900 dark:text-white mb-3">Create Subtask</h3>
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    Title *
+                  </label>
+                  <input
+                    type="text"
+                    value={subtaskTitle}
+                    onChange={(e) => setSubtaskTitle(e.target.value)}
+                    placeholder="Enter subtask title..."
+                    className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+                  />
+                </div>
+
+                <div className="grid grid-cols-3 gap-3">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                      Status
+                    </label>
+                    <Select
+                      value={subtaskStatus}
+                      onChange={(e) => setSubtaskStatus(e.target.value)}
+                      options={[
+                        { value: 'TODO', label: 'To Do' },
+                        { value: 'IN_PROGRESS', label: 'In Progress' },
+                        { value: 'IN_REVIEW', label: 'In Review' },
+                        { value: 'DONE', label: 'Done' },
+                      ]}
+                      className="w-full"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                      Story Points
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      value={subtaskStoryPoints}
+                      onChange={(e) => setSubtaskStoryPoints(e.target.value)}
+                      placeholder="Points"
+                      className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                      Assignee
+                    </label>
+                    <Select
+                      value={subtaskAssignee}
+                      onChange={(e) => setSubtaskAssignee(e.target.value)}
+                      options={[
+                        { value: '', label: 'Unassigned' },
+                        ...members.map((m) => ({ value: m.user_id, label: m.name })),
+                      ]}
+                      className="w-full"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex justify-end">
+                  <Button
+                    onClick={handleCreateSubtask}
+                    disabled={!subtaskTitle.trim()}
+                    loading={createSubtaskMutation.isPending}
+                  >
+                    Create Subtask
+                  </Button>
+                </div>
               </div>
             </div>
           </>
