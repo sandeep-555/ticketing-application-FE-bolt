@@ -15,17 +15,17 @@ import TicketDetailModal from '@/components/tickets/TicketDetailModal';
 
 const ITEM_TYPE = 'TICKET';
 
-function TicketCard({ ticket, status, onClick }) {
+function TicketCard({ ticket, status, onClick, isSubtask = false }) {
   const [{ isDragging }, drag] = useDrag(() => ({
     type: ITEM_TYPE,
-    item: { ticketId: ticket.id, fromStatus: status },
+    item: { ticketId: ticket.id, fromStatus: status, isSubtask },
     collect: (monitor) => ({
       isDragging: monitor.isDragging(),
     }),
   }));
 
-  const subtaskCount = ticket.subtasks?.length || 0;
-  const completedSubtasks = ticket.subtasks?.filter(st => st.status === 'DONE').length || 0;
+  const subtaskCount = ticket.subtask_count || 0;
+  const completedSubtasks = ticket.completed_subtasks || 0;
 
   return (
     <div
@@ -33,18 +33,28 @@ function TicketCard({ ticket, status, onClick }) {
       onClick={onClick}
       className={`bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4 cursor-pointer hover:shadow-md transition-shadow ${
         isDragging ? 'opacity-50' : ''
-      }`}
+      } ${isSubtask ? 'ml-4 border-l-4 border-l-purple-500' : ''}`}
     >
       <div className="flex items-start justify-between mb-2">
-        <span className="text-xs font-mono text-gray-500">{ticket.ticket_number}</span>
+        <div className="flex items-center gap-2">
+          {isSubtask && (
+            <svg className="w-4 h-4 text-purple-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+            </svg>
+          )}
+          <span className="text-xs font-mono text-gray-500">{ticket.ticket_number}</span>
+        </div>
         <Badge priority={ticket.priority}>{ticket.priority}</Badge>
       </div>
-      <h4 className="font-medium text-gray-900 dark:text-white mb-2">{ticket.title}</h4>
+      <h4 className="font-medium text-gray-900 dark:text-white mb-2">
+        {isSubtask && <span className="text-purple-600 dark:text-purple-400 mr-2">SUB:</span>}
+        {ticket.title}
+      </h4>
       <div className="flex items-center justify-between text-xs text-gray-500">
         <span>{ticket.assignee_name || 'Unassigned'}</span>
         <div className="flex items-center gap-2">
-          {subtaskCount > 0 && (
-            <span className="text-xs">
+          {!isSubtask && subtaskCount > 0 && (
+            <span className="text-xs bg-purple-100 dark:bg-purple-900 text-purple-700 dark:text-purple-300 px-2 py-1 rounded">
               {completedSubtasks}/{subtaskCount}
             </span>
           )}
@@ -55,10 +65,10 @@ function TicketCard({ ticket, status, onClick }) {
   );
 }
 
-function Column({ status, tickets, onDrop, onTicketClick }) {
+function Column({ status, tickets, subtasks, onDrop, onTicketClick }) {
   const [{ isOver }, drop] = useDrop(() => ({
     accept: ITEM_TYPE,
-    drop: (item) => onDrop(item.ticketId, item.fromStatus, status),
+    drop: (item) => onDrop(item.ticketId, item.fromStatus, status, item.isSubtask),
     collect: (monitor) => ({
       isOver: monitor.isOver(),
     }),
@@ -82,6 +92,8 @@ function Column({ status, tickets, onDrop, onTicketClick }) {
     CLOSED: 'Closed',
   };
 
+  const totalCount = tickets.length + subtasks.length;
+
   return (
     <div
       ref={drop}
@@ -93,7 +105,7 @@ function Column({ status, tickets, onDrop, onTicketClick }) {
         <h3 className="font-bold text-gray-900 dark:text-white">
           {statusLabels[status] || status}
         </h3>
-        <Badge variant="default">{tickets.length}</Badge>
+        <Badge variant="default">{totalCount}</Badge>
       </div>
       <div className="space-y-3">
         {tickets.map((ticket) => (
@@ -102,6 +114,16 @@ function Column({ status, tickets, onDrop, onTicketClick }) {
             ticket={ticket}
             status={status}
             onClick={() => onTicketClick(ticket)}
+            isSubtask={false}
+          />
+        ))}
+        {subtasks.map((subtask) => (
+          <TicketCard
+            key={`sub-${subtask.id}`}
+            ticket={subtask}
+            status={status}
+            onClick={() => onTicketClick(subtask)}
+            isSubtask={true}
           />
         ))}
       </div>
@@ -113,6 +135,7 @@ export default function BoardPage() {
   const [selectedProject, setSelectedProject] = useState('');
   const [viewMode, setViewMode] = useState('kanban');
   const [selectedTicket, setSelectedTicket] = useState(null);
+  const [expandedTickets, setExpandedTickets] = useState({});
   const queryClient = useQueryClient();
 
   const { data: projectsData } = useQuery({
@@ -137,6 +160,17 @@ export default function BoardPage() {
     },
   });
 
+  const updateSubtaskMutation = useMutation({
+    mutationFn: ({ id, data }) => ticketsAPI.updateSubTask(id, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['tickets', selectedProject] });
+      toast.success('Subtask updated successfully');
+    },
+    onError: () => {
+      toast.error('Failed to update subtask');
+    },
+  });
+
   useEffect(() => {
     if (selectedProject) {
       socketService.joinProject(selectedProject);
@@ -158,17 +192,39 @@ export default function BoardPage() {
     }
   }, [selectedProject, queryClient]);
 
-  const handleDrop = (ticketId, fromStatus, toStatus) => {
+  const handleDrop = (ticketId, fromStatus, toStatus, isSubtask) => {
     if (fromStatus === toStatus) return;
 
-    updateTicketMutation.mutate({
-      id: ticketId,
-      data: { status: toStatus }
-    });
+    if (isSubtask) {
+      updateSubtaskMutation.mutate({
+        id: ticketId,
+        data: { status: toStatus }
+      });
+    } else {
+      updateTicketMutation.mutate({
+        id: ticketId,
+        data: { status: toStatus }
+      });
+    }
+  };
+
+  const toggleTicketExpansion = (ticketId) => {
+    setExpandedTickets(prev => ({
+      ...prev,
+      [ticketId]: !prev[ticketId]
+    }));
   };
 
   const projects = projectsData?.data?.projects || [];
   const tickets = ticketsData?.data?.tickets || [];
+
+  const allSubtasks = tickets.flatMap(ticket =>
+    (ticket.subtasks || []).map(subtask => ({
+      ...subtask,
+      parent_ticket_id: ticket.id,
+      parent_ticket_number: ticket.ticket_number
+    }))
+  );
 
   const groupedTickets = tickets.reduce((acc, ticket) => {
     const status = ticket.status || 'OPEN';
@@ -179,9 +235,23 @@ export default function BoardPage() {
     return acc;
   }, {});
 
+  const groupedSubtasks = allSubtasks.reduce((acc, subtask) => {
+    const status = subtask.status || 'TODO';
+    if (!acc[status]) {
+      acc[status] = [];
+    }
+    acc[status].push(subtask);
+    return acc;
+  }, {});
+
   const statuses = ['OPEN', 'TODO', 'IN_PROGRESS', 'IN_REVIEW', 'DONE', 'CLOSED'];
   const board = statuses.reduce((acc, status) => {
     acc[status] = groupedTickets[status] || [];
+    return acc;
+  }, {});
+
+  const subtasksBoard = statuses.reduce((acc, status) => {
+    acc[status] = groupedSubtasks[status] || [];
     return acc;
   }, {});
 
@@ -237,12 +307,12 @@ export default function BoardPage() {
       ) : viewMode === 'kanban' ? (
         <DndProvider backend={HTML5Backend}>
           <div className="grid grid-cols-1 md:grid-cols-6 gap-4">
-            <Column status="OPEN" tickets={board.OPEN || []} onDrop={handleDrop} onTicketClick={setSelectedTicket} />
-            <Column status="TODO" tickets={board.TODO || []} onDrop={handleDrop} onTicketClick={setSelectedTicket} />
-            <Column status="IN_PROGRESS" tickets={board.IN_PROGRESS || []} onDrop={handleDrop} onTicketClick={setSelectedTicket} />
-            <Column status="IN_REVIEW" tickets={board.IN_REVIEW || []} onDrop={handleDrop} onTicketClick={setSelectedTicket} />
-            <Column status="DONE" tickets={board.DONE || []} onDrop={handleDrop} onTicketClick={setSelectedTicket} />
-            <Column status="CLOSED" tickets={board.CLOSED || []} onDrop={handleDrop} onTicketClick={setSelectedTicket} />
+            <Column status="OPEN" tickets={board.OPEN || []} subtasks={subtasksBoard.OPEN || []} onDrop={handleDrop} onTicketClick={setSelectedTicket} />
+            <Column status="TODO" tickets={board.TODO || []} subtasks={subtasksBoard.TODO || []} onDrop={handleDrop} onTicketClick={setSelectedTicket} />
+            <Column status="IN_PROGRESS" tickets={board.IN_PROGRESS || []} subtasks={subtasksBoard.IN_PROGRESS || []} onDrop={handleDrop} onTicketClick={setSelectedTicket} />
+            <Column status="IN_REVIEW" tickets={board.IN_REVIEW || []} subtasks={subtasksBoard.IN_REVIEW || []} onDrop={handleDrop} onTicketClick={setSelectedTicket} />
+            <Column status="DONE" tickets={board.DONE || []} subtasks={subtasksBoard.DONE || []} onDrop={handleDrop} onTicketClick={setSelectedTicket} />
+            <Column status="CLOSED" tickets={board.CLOSED || []} subtasks={subtasksBoard.CLOSED || []} onDrop={handleDrop} onTicketClick={setSelectedTicket} />
           </div>
         </DndProvider>
       ) : (
@@ -252,6 +322,7 @@ export default function BoardPage() {
               <table className="w-full">
                 <thead>
                   <tr className="border-b border-gray-200 dark:border-gray-700">
+                    <th className="text-left py-3 px-4 text-gray-700 dark:text-gray-300 w-8"></th>
                     <th className="text-left py-3 px-4 text-gray-700 dark:text-gray-300">Ticket</th>
                     <th className="text-left py-3 px-4 text-gray-700 dark:text-gray-300">Title</th>
                     <th className="text-left py-3 px-4 text-gray-700 dark:text-gray-300">Status</th>
@@ -263,37 +334,120 @@ export default function BoardPage() {
                 <tbody>
                   {tickets.length === 0 ? (
                     <tr>
-                      <td colSpan="6" className="text-center py-8 text-gray-500">
+                      <td colSpan="7" className="text-center py-8 text-gray-500">
                         No tickets found
                       </td>
                     </tr>
                   ) : (
-                    tickets.map((ticket) => (
-                      <tr
-                        key={ticket.id}
-                        onClick={() => setSelectedTicket(ticket)}
-                        className="border-b border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer"
-                      >
-                        <td className="py-3 px-4 text-sm font-mono text-gray-600 dark:text-gray-400">
-                          {ticket.ticket_number}
-                        </td>
-                        <td className="py-3 px-4 text-gray-900 dark:text-white">
-                          {ticket.title}
-                        </td>
-                        <td className="py-3 px-4">
-                          <Badge variant="default">{ticket.status}</Badge>
-                        </td>
-                        <td className="py-3 px-4">
-                          <Badge priority={ticket.priority}>{ticket.priority}</Badge>
-                        </td>
-                        <td className="py-3 px-4 text-gray-700 dark:text-gray-300">
-                          {ticket.assignee_name || 'Unassigned'}
-                        </td>
-                        <td className="py-3 px-4 text-gray-700 dark:text-gray-300">
-                          {ticket.story_points || '-'}
-                        </td>
-                      </tr>
-                    ))
+                    tickets.map((ticket) => {
+                      const ticketSubtasks = ticket.subtasks || [];
+                      const isExpanded = expandedTickets[ticket.id];
+
+                      return (
+                        <>
+                          <tr
+                            key={ticket.id}
+                            className="border-b border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800"
+                          >
+                            <td className="py-3 px-4">
+                              {ticketSubtasks.length > 0 && (
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    toggleTicketExpansion(ticket.id);
+                                  }}
+                                  className="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
+                                >
+                                  <svg
+                                    className={`w-5 h-5 transition-transform ${isExpanded ? 'rotate-90' : ''}`}
+                                    fill="none"
+                                    stroke="currentColor"
+                                    viewBox="0 0 24 24"
+                                  >
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                                  </svg>
+                                </button>
+                              )}
+                            </td>
+                            <td
+                              onClick={() => setSelectedTicket(ticket)}
+                              className="py-3 px-4 text-sm font-mono text-gray-600 dark:text-gray-400 cursor-pointer"
+                            >
+                              {ticket.ticket_number}
+                            </td>
+                            <td
+                              onClick={() => setSelectedTicket(ticket)}
+                              className="py-3 px-4 text-gray-900 dark:text-white cursor-pointer"
+                            >
+                              <div className="flex items-center gap-2">
+                                {ticket.title}
+                                {ticketSubtasks.length > 0 && (
+                                  <span className="text-xs bg-purple-100 dark:bg-purple-900 text-purple-700 dark:text-purple-300 px-2 py-1 rounded">
+                                    {ticketSubtasks.filter(st => st.status === 'DONE').length}/{ticketSubtasks.length}
+                                  </span>
+                                )}
+                              </div>
+                            </td>
+                            <td
+                              onClick={() => setSelectedTicket(ticket)}
+                              className="py-3 px-4 cursor-pointer"
+                            >
+                              <Badge variant="default">{ticket.status}</Badge>
+                            </td>
+                            <td
+                              onClick={() => setSelectedTicket(ticket)}
+                              className="py-3 px-4 cursor-pointer"
+                            >
+                              <Badge priority={ticket.priority}>{ticket.priority}</Badge>
+                            </td>
+                            <td
+                              onClick={() => setSelectedTicket(ticket)}
+                              className="py-3 px-4 text-gray-700 dark:text-gray-300 cursor-pointer"
+                            >
+                              {ticket.assignee_name || 'Unassigned'}
+                            </td>
+                            <td
+                              onClick={() => setSelectedTicket(ticket)}
+                              className="py-3 px-4 text-gray-700 dark:text-gray-300 cursor-pointer"
+                            >
+                              {ticket.story_points || '-'}
+                            </td>
+                          </tr>
+                          {isExpanded && ticketSubtasks.map((subtask) => (
+                            <tr
+                              key={`sub-${subtask.id}`}
+                              onClick={() => setSelectedTicket(subtask)}
+                              className="border-b border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer bg-purple-50 dark:bg-purple-950"
+                            >
+                              <td className="py-3 px-4"></td>
+                              <td className="py-3 px-4 text-sm font-mono text-purple-600 dark:text-purple-400 pl-8">
+                                <div className="flex items-center gap-2">
+                                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                                  </svg>
+                                  {subtask.ticket_number || 'SUB'}
+                                </div>
+                              </td>
+                              <td className="py-3 px-4 text-gray-900 dark:text-white pl-8">
+                                {subtask.title}
+                              </td>
+                              <td className="py-3 px-4">
+                                <Badge variant="default">{subtask.status}</Badge>
+                              </td>
+                              <td className="py-3 px-4">
+                                <Badge priority={subtask.priority}>{subtask.priority}</Badge>
+                              </td>
+                              <td className="py-3 px-4 text-gray-700 dark:text-gray-300">
+                                {subtask.assignee_name || 'Unassigned'}
+                              </td>
+                              <td className="py-3 px-4 text-gray-700 dark:text-gray-300">
+                                {subtask.story_points || '-'}
+                              </td>
+                            </tr>
+                          ))}
+                        </>
+                      );
+                    })
                   )}
                 </tbody>
               </table>

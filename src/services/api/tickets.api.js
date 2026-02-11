@@ -36,6 +36,11 @@ export const ticketsAPI = {
     return response.data;
   },
 
+  getSubTasks: async (id) => {
+    const response = await axios.get(`/tickets/${id}/subtasks`);
+    return response.data;
+  },
+
   createSubTask: async (id, subTaskData) => {
     const response = await axios.post(`/tickets/${id}/subtasks`, subTaskData);
     return response.data;
@@ -43,6 +48,11 @@ export const ticketsAPI = {
 
   updateSubTask: async (subTaskId, data) => {
     const response = await axios.patch(`/subtasks/${subTaskId}`, data);
+    return response.data;
+  },
+
+  deleteSubTask: async (subTaskId) => {
+    const response = await axios.delete(`/subtasks/${subTaskId}`);
     return response.data;
   },
 

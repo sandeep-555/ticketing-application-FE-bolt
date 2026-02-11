@@ -108,6 +108,12 @@ export default function TicketDetailModal({ ticket, ticketId, isOpen = true, onC
     enabled: !!effectiveProjectId,
   });
 
+  const { data: subtasksData, isLoading: subtasksLoading } = useQuery({
+    queryKey: ['subtasks', effectiveTicketId],
+    queryFn: () => ticketsAPI.getSubTasks(effectiveTicketId),
+    enabled: isOpen && !!effectiveTicketId,
+  });
+
   const addCommentMutation = useMutation({
     mutationFn: (data) => ticketsAPI.addComment(effectiveTicketId, data),
     onSuccess: () => {
@@ -124,6 +130,7 @@ export default function TicketDetailModal({ ticket, ticketId, isOpen = true, onC
   const createSubtaskMutation = useMutation({
     mutationFn: (data) => ticketsAPI.createSubTask(effectiveTicketId, data),
     onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['subtasks', effectiveTicketId] });
       queryClient.invalidateQueries({ queryKey: ['ticket', effectiveTicketId] });
       queryClient.invalidateQueries({ queryKey: ['tickets'] });
       setSubtaskTitle('');
@@ -137,12 +144,26 @@ export default function TicketDetailModal({ ticket, ticketId, isOpen = true, onC
   const updateSubtaskMutation = useMutation({
     mutationFn: ({ subTaskId, data }) => ticketsAPI.updateSubTask(subTaskId, data),
     onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['subtasks', effectiveTicketId] });
       queryClient.invalidateQueries({ queryKey: ['ticket', effectiveTicketId] });
       queryClient.invalidateQueries({ queryKey: ['tickets'] });
       toast.success('Subtask updated');
     },
     onError: () => {
       toast.error('Failed to update subtask');
+    },
+  });
+
+  const deleteSubtaskMutation = useMutation({
+    mutationFn: (subTaskId) => ticketsAPI.deleteSubTask(subTaskId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['subtasks', effectiveTicketId] });
+      queryClient.invalidateQueries({ queryKey: ['ticket', effectiveTicketId] });
+      queryClient.invalidateQueries({ queryKey: ['tickets'] });
+      toast.success('Subtask deleted');
+    },
+    onError: () => {
+      toast.error('Failed to delete subtask');
     },
   });
 
@@ -256,7 +277,7 @@ export default function TicketDetailModal({ ticket, ticketId, isOpen = true, onC
   const currentTicket = ticket || ticketData?.data;
   const comments = commentsData?.data || [];
   const members = membersData?.data || [];
-  const subtasks = currentTicket?.subtasks || [];
+  const subtasks = subtasksData?.data || [];
 
   const filteredMembers = showMentions
     ? members.filter((m) => m.name.toLowerCase().includes(mentionSearch))
@@ -403,35 +424,78 @@ export default function TicketDetailModal({ ticket, ticketId, isOpen = true, onC
         ) : (
           <>
             <div className="flex-1 overflow-y-auto mb-4 pr-2">
-              {subtasks.length === 0 ? (
+              {subtasksLoading ? (
+                <Loading />
+              ) : subtasks.length === 0 ? (
                 <div className="text-center text-gray-500 py-8">
                   No subtasks yet. Create one to break down this ticket!
                 </div>
               ) : (
-                <div className="space-y-2">
+                <div className="space-y-3">
                   {subtasks.map((subtask) => (
                     <div
                       key={subtask.id}
-                      className="flex items-start gap-3 p-3 bg-gray-50 dark:bg-gray-800 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                      className="p-3 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700"
                     >
-                      <input
-                        type="checkbox"
-                        checked={subtask.status === 'DONE'}
-                        onChange={() => handleToggleSubtaskStatus(subtask)}
-                        className="mt-1 rounded text-blue-600 focus:ring-blue-500"
-                      />
-                      <div className="flex-1">
-                        <p className={`text-gray-900 dark:text-white ${
-                          subtask.status === 'DONE' ? 'line-through opacity-60' : ''
-                        }`}>
-                          {subtask.title}
-                        </p>
-                        <div className="flex gap-2 mt-1">
-                          <Badge variant="default" className="text-xs">{subtask.status}</Badge>
-                          {subtask.assignee_name && (
-                            <span className="text-xs text-gray-500">{subtask.assignee_name}</span>
-                          )}
+                      <div className="flex items-start gap-3">
+                        <input
+                          type="checkbox"
+                          checked={subtask.status === 'DONE'}
+                          onChange={() => handleToggleSubtaskStatus(subtask)}
+                          className="mt-1 rounded text-blue-600 focus:ring-blue-500"
+                        />
+                        <div className="flex-1 min-w-0">
+                          <p className={`text-gray-900 dark:text-white font-medium mb-2 ${
+                            subtask.status === 'DONE' ? 'line-through opacity-60' : ''
+                          }`}>
+                            {subtask.title}
+                          </p>
+                          <div className="flex flex-wrap gap-2 items-center">
+                            <Select
+                              value={subtask.status}
+                              onChange={(e) => updateSubtaskMutation.mutate({
+                                subTaskId: subtask.id,
+                                data: { status: e.target.value }
+                              })}
+                              options={[
+                                { value: 'TODO', label: 'To Do' },
+                                { value: 'IN_PROGRESS', label: 'In Progress' },
+                                { value: 'IN_REVIEW', label: 'In Review' },
+                                { value: 'DONE', label: 'Done' },
+                              ]}
+                              className="text-xs w-32"
+                            />
+                            <Select
+                              value={subtask.assignee_id || ''}
+                              onChange={(e) => updateSubtaskMutation.mutate({
+                                subTaskId: subtask.id,
+                                data: { assignee_id: e.target.value || null }
+                              })}
+                              options={[
+                                { value: '', label: 'Unassigned' },
+                                ...members.map((m) => ({ value: m.user_id, label: m.name })),
+                              ]}
+                              className="text-xs w-40"
+                            />
+                            {subtask.story_points && (
+                              <Badge variant="primary" className="text-xs">
+                                {subtask.story_points} pts
+                              </Badge>
+                            )}
+                          </div>
                         </div>
+                        <button
+                          onClick={() => {
+                            if (confirm('Delete this subtask?')) {
+                              deleteSubtaskMutation.mutate(subtask.id);
+                            }
+                          }}
+                          className="text-red-500 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"
+                        >
+                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                          </svg>
+                        </button>
                       </div>
                     </div>
                   ))}
