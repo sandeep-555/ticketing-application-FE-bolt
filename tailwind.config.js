@@ -1,0 +1,55 @@
+/** @type {import('tailwindcss').Config} */
+export default {
+  content: ['./index.html', './src/**/*.{js,jsx}'],
+  darkMode: 'class',
+  theme: {
+    extend: {
+      colors: {
+        primary: {
+          DEFAULT: '#052350',
+          50: '#E6EBF3',
+          100: '#CCD7E7',
+          200: '#99AFCF',
+          300: '#6687B7',
+          400: '#335F9F',
+          500: '#052350',
+          600: '#041C40',
+          700: '#031530',
+          800: '#020E20',
+          900: '#010710',
+        },
+        secondary: {
+          DEFAULT: '#0676CF',
+          50: '#E6F3FC',
+          100: '#CCE7F9',
+          200: '#99CFF3',
+          300: '#66B7ED',
+          400: '#339FE7',
+          500: '#0676CF',
+          600: '#055EA6',
+          700: '#04477C',
+          800: '#022F53',
+          900: '#011829',
+        },
+        danger: {
+          DEFAULT: '#EA1E28',
+          50: '#FEE7E8',
+          100: '#FDCFD1',
+          200: '#FB9FA3',
+          300: '#F96F75',
+          400: '#F73F47',
+          500: '#EA1E28',
+          600: '#BB1820',
+          700: '#8C1218',
+          800: '#5D0C10',
+          900: '#2E0608',
+        },
+        glass: '#BAD4F3',
+      },
+      backdropBlur: {
+        xs: '2px',
+      },
+    },
+  },
+  plugins: [],
+};
