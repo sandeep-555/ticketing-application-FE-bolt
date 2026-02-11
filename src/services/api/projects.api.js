@@ -47,10 +47,19 @@ export const projectsAPI = {
   },
 
   getAgents: async (search = '') => {
-  const response = await axios.get(`/projects/agents`, {
-    params: { search },
-  });
-  return response.data;
-}
+    const response = await axios.get(`/projects/agents`, {
+      params: { search },
+    });
+    return response.data;
+  },
 
+  getVelocity: async (projectId) => {
+    const response = await axios.get(`/projects/${projectId}/velocity`);
+    return response.data;
+  },
+
+  getMonthlySplit: async (projectId) => {
+    const response = await axios.get(`/projects/${projectId}/monthly-split`);
+    return response.data;
+  },
 };

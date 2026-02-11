@@ -60,4 +60,18 @@ export const ticketsAPI = {
     const response = await axios.post(`/tickets/${id}/approve`, approvalData);
     return response.data;
   },
+
+  uploadAttachment: async (id, formData) => {
+    const response = await axios.post(`/tickets/${id}/attachments`, formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    });
+    return response.data;
+  },
+
+  getAttachments: async (id) => {
+    const response = await axios.get(`/tickets/${id}/attachments`);
+    return response.data;
+  },
 };
